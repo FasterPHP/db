@@ -1,0 +1,26 @@
+{
+    "name": "faster-php/db",
+    "description": "Faster PHP database connection management",
+    "type": "library",
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5"
+    },
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Marcus Don",
+            "email": "marcus@sqldevelopment.co.uk"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+	"autoload": {
+		"psr-4": {"FasterPhp\\Db\\": "src/"}
+	},
+	"autoload-dev": {
+		"psr-4": {"FasterPhp\\Db\\": "tests/"}
+	}
+}
