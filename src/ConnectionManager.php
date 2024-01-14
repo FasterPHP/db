@@ -71,6 +71,23 @@ class ConnectionManager
 	}
 
 	/**
+	 * Get actual database name corresponding to connection name.
+	 *
+	 * @param string $dbKey Connection name.
+	 *
+	 * @return string
+	 */
+	public static function getDbName(string $dbKey): string
+	{
+		$dsn = self::_getDsn($dbKey);
+		$dbName = preg_replace('/^.*;?dbname=([^;]+);?.*$/', '$1', $dsn);
+		if (empty($dbName)) {
+			throw new Exception('Failed to extract dbname from DSN: ' . $dsn);
+		}
+		return $dbName;
+	}
+
+	/**
 	 * Releases the connection back into the pool.
 	 *
 	 * @param string $dbKey Connection name.
@@ -149,14 +166,32 @@ class ConnectionManager
 	protected static function _getNewConnection(string $dbKey): PDO
 	{
 		$dbConfig = self::_getDbConfig($dbKey);
-		if (empty($dbConfig['dsn'])) {
-			throw new Exception("PDO DSN not defined for database '$dbKey'");
-		}
+		$dsn = self::_getDsn($dbKey, $dbConfig);
 		$username = $dbConfig['username'] ?? null;
 		$password = $dbConfig['password'] ?? null;
 		$options = $dbConfig['options'] ?? null;
 
-		return new PDO($dbConfig['dsn'], $username, $password, $options);
+		return new PDO($dsn, $username, $password, $options);
+	}
+
+	/**
+	 * Get DSN for database connection.
+	 *
+	 * @param string $dbKey Connection name.
+	 * @param array $dbConfig Optional Db config, if already retrieved.
+	 *
+	 * @return string
+	 */
+	protected static function _getDsn(string $dbKey, array $dbConfig = null): string
+	{
+		if (is_null($dbConfig)) {
+			$dbConfig = self::_getDbConfig($dbKey);
+		}
+		if (empty($dbConfig['dsn'])) {
+			throw new Exception("PDO DSN not defined for database '$dbKey'");
+		}
+
+		return $dbConfig['dsn'];
 	}
 
 	/**
