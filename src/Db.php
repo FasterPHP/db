@@ -154,7 +154,7 @@ class Db
 	}
 
 	/**
-	 * Wraps PDO's quote method to allow usage for all primative types and arrays.
+	 * Wraps PDO's quote method to allow usage for all primitive types and arrays.
 	 *
 	 * @param array|mixed $args          Argument(s) to escape.
 	 * @param integer     $parameterType Provides a data type hint for drivers that have alternate quoting styles.
