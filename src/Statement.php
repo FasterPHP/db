@@ -126,7 +126,7 @@ class Statement
 			restore_error_handler();
 
 			// Check whether it's an issue we can handle by reconnecting
-			if (false === preg_match(ConnectionManager::getAutoReconnectErrorsRegex(), $ex->getMessage())) {
+			if (0 === preg_match(ConnectionManager::getAutoReconnectErrorsRegex(), $ex->getMessage())) {
 				throw $ex;
 			}
 
