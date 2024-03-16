@@ -163,12 +163,13 @@ class Db
 	 */
 	public function quote($args, $parameterType = PDO::PARAM_STR)
 	{
+		$pdo = $this->getPdo();
 		if (is_array($args)) {
-			return implode(', ', array_map(function ($arg) use ($parameterType) {
-				return $this->getPdo()->quote((string) $arg, $parameterType);
+			return implode(', ', array_map(function ($arg) use ($pdo, $parameterType) {
+				return $pdo->quote((string) $arg, $parameterType);
 			}, $args));
 		}
-		return $this->getPdo()->quote((string) $args, $parameterType);
+		return $pdo->quote((string) $args, $parameterType);
 	}
 
 	/**
