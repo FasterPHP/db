@@ -1,4 +1,6 @@
-composer.lock
 vendor
 .phpunit.result.cache
-/nbproject/private/
+nbproject
+docs
+build
+composer.lock

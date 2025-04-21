@@ -1,350 +1,117 @@
 <?php
-/**
- * Tests for Db class.
- */
+
+declare(strict_types=1);
+
 namespace FasterPhp\Db;
 
-use PDO;
-use PDOStatement;
 use PHPUnit\Framework\TestCase;
+use PDO;
+use PDOException;
 
-/**
- * Tests for Db class.
- */
-class DbTest extends TestCase
+final class DbTest extends TestCase
 {
-	/**
-	 * Setup before every test.
-	 *
-	 * @return void
-	 */
-	public function setUp(): void
-	{
-		ConnectionManager::clearConnectionPool();
-		Db::clearStatementCache();
-	}
+    private ?Db $db = null;
 
-	/**
-	 * Test with unknown connection name.
-	 *
-	 * @return void
-	 */
-	public function testUnknownConnection(): void
-	{
-		$this->expectException(\FasterPhp\Db\Exception::class);
-		$this->expectExceptionMessage("Database connection name 'foo' not found");
+    protected function setUp(): void
+    {
+        $this->db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $this->db->exec("DROP TABLE IF EXISTS `test`");
+        $this->db->exec("
+            CREATE TABLE `test` (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100) NOT NULL DEFAULT ''
+            ) ENGINE=InnoDB;
+        ");
+    }
 
-		Db::newDb('foo')->query('bar');
-	}
+    public function testLazyConnection(): void
+    {
+        $this->assertInstanceOf(Db::class, $this->db);
+        $this->assertInstanceOf(PDO::class, $this->db);
+        $this->assertInstanceOf(PDO::class, $this->db->getPdo());
+    }
 
-	/**
-	 * Test that new instance returns new connection when existing connection still in use.
-	 *
-	 * @return void
-	 */
-	public function testPooledInUse(): void
-	{
-		$dbA = Db::newDb('testdb');
-		$connectionIdA = $this->_getConnectionId($dbA);
+    public function testQuote(): void
+    {
+        $quoted = $this->db->quote("O'Reilly");
+        $this->assertSame("'O\\'Reilly'", $quoted);
+    }
 
-		// Create another instance which should NOT re-use the previous connection.
-		$dbB = Db::newDb('testdb');
-		$connectionIdB = $this->_getConnectionId($dbB);
-		$this->assertNotSame($connectionIdA, $connectionIdB);
-	}
+    public function testInsertAndQuery(): void
+    {
+        $this->db->exec("INSERT INTO test (name) VALUES ('Alice')");
+        $stmt = $this->db->query("SELECT name FROM test WHERE id = 1");
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $this->assertSame(['name' => 'Alice'], $result);
+    }
 
-	/**
-	 * Test that new instance returns same connection when connection no longer in use.
-	 *
-	 * @return void
-	 */
-	public function testPooled(): void
-	{
-		$dbA = Db::newDb('testdb');
-		$connectionIdA = $this->_getConnectionId($dbA);
+    public function testPrepareAndExecute(): void
+    {
+        $stmt = $this->db->prepare("INSERT INTO test (name) VALUES (:name)");
+        $stmt->execute([':name' => 'Bob']);
 
-		// Destroy the adapter to release its connection back into the pool.
-		unset($dbA);
+        $stmt = $this->db->prepare("SELECT name FROM test WHERE name = :name");
+        $stmt->execute([':name' => 'Bob']);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $this->assertSame(['name' => 'Bob'], $result);
+    }
 
-		// Create another instance which should re-use the previous connection.
-		$dbB = Db::newDb('testdb');
-		$connectionIdB = $this->_getConnectionId($dbB);
-		$this->assertSame($connectionIdA, $connectionIdB);
-	}
+    public function testTransactions(): void
+    {
+        $this->assertFalse($this->db->inTransaction());
+        $this->db->beginTransaction();
+        $this->assertTrue($this->db->inTransaction());
+        $this->db->commit();
+        $this->assertFalse($this->db->inTransaction());
+    }
 
-	/**
-	 * Test that new instance returns new connection when pooling enabled, but buffered query not read.
-	 *
-	 * @return void
-	 */
-	public function testPooledBuffered(): void
-	{
-		$dbA = Db::newDb('testdb');
-		$connectionIdA = $this->_getConnectionId($dbA);
+    public function testRollback(): void
+    {
+        $this->db->beginTransaction();
+        $this->db->exec("INSERT INTO test (name) VALUES ('Charlie')");
+        $this->db->rollBack();
+        $this->assertFalse($this->db->inTransaction(), 'Transaction not rolled back');
 
-		// Run exec query and don't read results, so it can't be re-used
-		$dbA->exec('SHOW WARNINGS');
-		unset($dbA);
+        $stmt = $this->db->query("SELECT COUNT(*) FROM test");
+        $count = $stmt->fetchColumn();
+        $this->assertSame("0", (string)$count);
+    }
 
-		// Create another instance which should NOT re-use the previous connection.
-		$dbB = Db::newDb('testdb');
-		$connectionIdB = $this->_getConnectionId($dbB);
-		$this->assertNotSame($connectionIdA, $connectionIdB);
-	}
+    public function testLastInsertId(): void
+    {
+        $this->db->exec("INSERT INTO test (name) VALUES ('Charlie')");
+        $this->assertSame('1', $this->db->lastInsertId());
+    }
 
-	/**
-	 * Test that when multiple connections are used at the same time, they are later re-used.
-	 *
-	 * @return void
-	 */
-	public function testPooledConnectionsAreReUsed(): void
-	{
-		// Get first instance/connection
-		$dbA = Db::newDb('testdb');
-		$connectionIdA = $this->_getConnectionId($dbA);
+    public function testErrorCode(): void
+    {
+        try {
+            $this->db->exec("INSERT INTO notexists (name) VALUES ('blah')");
+        } catch (PDOException) {
+        }
+        $this->assertSame('42S02', $this->db->errorCode());
+    }
 
-		// Create buffered result so first connection can't be reused
-		$dbA->exec('SHOW WARNINGS');
-		unset($dbA);
+    public function testErrorInfo(): void
+    {
+        try {
+            $this->db->exec("INSERT INTO notexists (name) VALUES ('blah')");
+        } catch (PDOException) {
+        }
+        $this->assertSame(['42S02', 1146, "Table 'testdb.notexists' doesn't exist"], $this->db->errorInfo());
+    }
 
-		// Get second instance and confirm it's NOT the same connection
-		$dbB = Db::newDb('testdb');
-		$connectionIdB = $this->_getConnectionId($dbB);
-		$this->assertNotSame($connectionIdA, $connectionIdB);
+    public function testSetGetAttribute(): void
+    {
+        $this->assertSame(PDO::ERRMODE_EXCEPTION, $this->db->getAttribute(PDO::ATTR_ERRMODE));
+        $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_WARNING);
+        $this->assertSame(PDO::ERRMODE_WARNING, $this->db->getAttribute(PDO::ATTR_ERRMODE));
+    }
 
-		// Release second instance back into pool
-		unset($dbB);
-
-		// Create third instance and confirm it's the same as the second
-		$dbC = Db::newDb('testdb');
-		$connectionIdC = $this->_getConnectionId($dbC);
-		$this->assertSame($connectionIdB, $connectionIdC);
-
-		// Create buffered result so third connection can't be reused
-		$dbC->exec('SHOW WARNINGS');
-
-		// Create final connection and confirm it's new
-		$dbD = Db::newDb('testdb');
-		$connectionIdD = $this->_getConnectionId($dbD);
-		$this->assertNotSame($connectionIdA, $connectionIdD);
-		$this->assertNotSame($connectionIdB, $connectionIdD);
-		$this->assertNotSame($connectionIdC, $connectionIdD);
-	}
-
-	/**
-	 * Test that new instance returns new connection when it times out.
-	 *
-	 * @return void
-	 */
-	public function testAutoReconnectTimeout(): void
-	{
-		$dbA = Db::newDb('testdb');
-		$connectionIdA = $this->_getConnectionId($dbA);
-
-		// Force connection to timeout
-		$dbA->exec('SET wait_timeout = 1');
-		sleep(2);
-		unset($dbA);
-
-		// Create another instance which should NOT re-use the previous connection.
-		$dbB = Db::newDb('testdb');
-		$connectionIdB = $this->_getConnectionId($dbB);
-		$this->assertNotSame($connectionIdA, $connectionIdB);
-	}
-
-	/**
-	 * Test that new instance returns new connection when it times out and exceptions not used.
-	 *
-	 * @return void
-	 */
-	public function testAutoReconnectTimeoutError(): void
-	{
-		$dbA = Db::newDb('testdb');
-		$dbA->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_WARNING);
-		$connectionIdA = $this->_getConnectionId($dbA);
-
-		// Force connection to timeout
-		$dbA->exec('SET wait_timeout = 1');
-		sleep(2);
-		unset($dbA);
-
-		// Create another instance which should NOT re-use the previous connection.
-		$dbB = Db::newDb('testdb');
-		$dbB->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_WARNING);
-		$connectionIdB = $this->_getConnectionId($dbB);
-		$this->assertNotSame($connectionIdA, $connectionIdB);
-	}
-
-	/**
-	 * Test auto-reconnect happens when pool contains only stale connections and auto-reconnect enabled.
-	 *
-	 * @return void
-	 */
-	public function testPooledAutoReconnectStaleCache(): void
-	{
-		$dbA = Db::newDb('testdb');
-		$connectionIdA = $this->_getConnectionId($dbA);
-		$dbA->exec('SET wait_timeout = 1');
-
-		$dbB = Db::newDb('testdb');
-		$connectionIdB = $this->_getConnectionId($dbB);
-		$dbB->exec('SET wait_timeout = 1');
-
-		unset($dbA);
-		unset($dbB);
-
-		sleep(2);
-
-		// Create another instance which should re-use the previous connection.
-		$dbC = Db::newDb('testdb');
-		$connectionIdC = $this->_getConnectionId($dbC);
-
-		$this->assertNotEquals($connectionIdA, $connectionIdB);
-		$this->assertNotEquals($connectionIdA, $connectionIdC);
-		$this->assertNotEquals($connectionIdB, $connectionIdC);
-	}
-
-	/**
-	 * Test prepared statement cache.
-	 *
-	 * @return void
-	 */
-	public function testPreparedStatementCache(): void
-	{
-		$sql = 'SELECT 1';
-
-		$mockStatement = $this->getMockBuilder(PDOStatement::class)
-			->disableOriginalConstructor()
-			->getMock();
-
-		$mockPdo = $this->getMockBuilder(PDO::class)
-			->disableOriginalConstructor()
-			->setMethods(['prepare'])
-			->getMock();
-		$mockPdo->expects($this->once()) // Note: Should only be called once
-			->method('prepare')
-			->with($sql)
-			->willReturn($mockStatement);
-
-		$db = Db::newDb('testdb');
-		$db->setPdo($mockPdo);
-
-		$db->prepare($sql);
-		$this->assertInstanceOf(Statement::class, $db->prepare($sql));
-	}
-
-	/**
-	 * Test reconnect in prepare method when emulation disabled.
-	 *
-	 * @return void
-	 */
-	public function testPrepareReconnect(): void
-	{
-		ConnectionManager::clearConnectionPool();
-
-		$db = Db::newDb('testdb');
-		$db->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-		$db->exec('SET wait_timeout = 1');
-
-		sleep(2);
-
-		$statement = $db->prepare('SELECT 1');
-
-		$this->assertInstanceOf(Statement::class, $statement);
-	}
-
-	/**
-	 * Test reconnect in execute method of prepared statement.
-	 *
-	 * @return void
-	 */
-	public function testPrepareExecuteReconnect(): void
-	{
-		$db = Db::newDb('testdb');
-		$connectionIdA = $this->_getConnectionId($db);
-
-		$statement = $db->prepare('SELECT 1 AS value');
-
-		// Force connection to timeout
-		$db->exec('SET wait_timeout = 1');
-		sleep(2);
-
-		$statement->execute();
-		$this->assertEquals(['value' => 1], $statement->fetch());
-
-		$connectionIdB = $this->_getConnectionId($db);
-		$this->assertNotEquals($connectionIdA, $connectionIdB);
-	}
-
-	/**
-	 * Test quote string.
-	 *
-	 * @return void
-	 */
-	public function testQuoteString(): void
-	{
-		$input = "test'text";
-		$expected = "'test\\'text'";
-
-		$db = Db::newDb('testdb');
-
-		$this->assertSame($expected, $db->quote($input));
-	}
-
-	/**
-	 * Test quote integer.
-	 *
-	 * @return void
-	 */
-	public function testQuoteInteger(): void
-	{
-		$input = 123;
-		$expected = "'123'";
-
-		$db = Db::newDb('testdb');
-
-		$this->assertSame($expected, $db->quote($input));
-	}
-
-	/**
-	 * Test quote array of strings.
-	 *
-	 * @return void
-	 */
-	public function testQuoteStringArray()
-	{
-		$input = ["test'text1", "test'text2"];
-		$expected = "'test\\'text1', 'test\\'text2'";
-
-		$db = Db::newDb('testdb');
-
-		$this->assertSame($expected, $db->quote($input));
-	}
-
-	/**
-	 * Test quote array of integers.
-	 *
-	 * @return void
-	 */
-	public function testQuoteIntegerArray()
-	{
-		$input = [123, 456];
-		$expected = "'123', '456'";
-
-		$db = Db::newDb('testdb');
-
-		$this->assertSame($expected, $db->quote($input));
-	}
-
-	/**
-	 * Get ID of current connection.
-	 *
-	 * @param Db $db Db instance.
-	 *
-	 * @return string
-	 */
-	protected function _getConnectionId(Db $db): string
-	{
-		return $db->query('SELECT CONNECTION_ID() AS id')->fetchObject()->id;
-	}
+    public function testGetAvailableDrivers(): void
+    {
+        $drivers = $this->db->getAvailableDrivers();
+        $this->assertIsArray($drivers);
+        $this->assertContains('mysql', $drivers);
+    }
 }

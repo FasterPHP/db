@@ -1,259 +1,155 @@
 <?php
-/**
- * Db class.
- *
- * Proxy of PDO to provide lazy-loading of connections (ie only connects when needed),
- * connection-pooling, auto-reconnect and automatic caching of prepared statements.
- */
+
 declare(strict_types=1);
 
 namespace FasterPhp\Db;
 
+use FasterPhp\Db\Reconnect;
 use PDO;
+use PDOException;
 
-/**
- * Db class.
- */
-class Db
+class Db extends PDO
 {
-	/**
-	 * Methods for which to use auto-reconnect.
-	 *
-	 * @const array
-	 */
-	protected const AUTORECONNECT_METHODS = ['exec', 'query'];
+    protected string $dsn;
+    protected ?string $username;
+    protected ?string $password;
+    protected ?array $options;
+    protected Reconnect\StrategyInterface $reconnectStrategy;
+    protected ?PDO $pdo = null;
+    private array $statementCache = [];
 
-	/**
-	 * Database connection name (db config key).
-	 *
-	 * @var string
-	 */
-	protected string $_dbKey;
+    public function __construct(
+        string $dsn,
+        ?string $username = null,
+        #[\SensitiveParameter] ?string $password = null,
+        ?array $options = null,
+        ?Reconnect\StrategyInterface $reconnectStrategy = null
+    ) {
+        $this->dsn = $dsn;
+        $this->username = $username;
+        $this->password = $password;
+        $this->options = $options;
+        $this->reconnectStrategy = $reconnectStrategy ?? new Reconnect\DefaultStrategy();
+    }
 
-	/**
-	 * PDO instance.
-	 *
-	 * @var PDO|null
-	 */
-	protected ?PDO $_pdo;
+    public function getReconnectStrategy(): Reconnect\StrategyInterface
+    {
+        return $this->reconnectStrategy;
+    }
 
-	/**
-	 * Statement cache.
-	 *
-	 * @var Statement[]
-	 */
-	protected static array $_statements = [];
+    public function setPdo(?PDO $pdo): void
+    {
+        $this->pdo = $pdo;
+    }
 
-	/**
-	 * Create a new instance for the requested database connection.
-	 *
-	 * @param string $dbKey Database connection name (db config key).
-	 *
-	 * @return self
-	 */
-	public static function newDb(string $dbKey): Db
-	{
-		return new self($dbKey);
-	}
+    public function getPdo(): PDO
+    {
+        return $this->pdo ??= new PDO($this->dsn, $this->username, $this->password, $this->options);
+    }
 
-	/**
-	 * Clear Statement cache (for unit testing).
-	 *
-	 * @return void
-	 */
-	public static function clearStatementCache(): void
-	{
-		self::$_statements = [];
-	}
+    public function prepare(string $query, array $options = [], DbStatement $dbStatement = null): DbStatement|false
+    {
+        $hash = md5($query . '|' . serialize($options));
 
-	/**
-	 * Object constructor.
-	 *
-	 * @param string $dbKey Connection name.
-	 */
-	protected function __construct(string $dbKey)
-	{
-		$this->_dbKey = $dbKey;
-	}
+        if (empty($dbStatement) && isset($this->statementCache[$hash])) {
+            return $this->statementCache[$hash];
+        }
 
-	/**
-	 * Get connection name.
-	 *
-	 * @return string
-	 */
-	public function getDbKey(): string
-	{
-		return $this->_dbKey;
-	}
+        $stmt = $this->attemptWithReconnect(function () use ($query) {
+            return $this->getPdo()->prepare($query);
+        });
 
-	/**
-	 * Set PDO instance.
-	 *
-	 * @param PDO|null $pdo PDO instance, or null to unset.
-	 *
-	 * @return self
-	 */
-	public function setPdo(?PDO $pdo): self
-	{
-		$this->_pdo = $pdo;
-		return $this;
-	}
+        if (false === $stmt) {
+            return false;
+        }
 
-	/**
-	 * Get PDO instance via lazy-loading.
-	 *
-	 * @return PDO
-	 * @throws Exception If DSN not defined.
-	 */
-	public function getPdo(): PDO
-	{
-		if (!isset($this->_pdo)) {
-			$this->_pdo = ConnectionManager::getConnection($this->getDbKey());
-		}
-		return $this->_pdo;
-	}
+        if (empty($dbStatement)) {
+            $dbStatement = new DbStatement($this, $stmt, $query, $options);
+        } else {
+            $dbStatement->setPdoStatement($stmt);
+        }
 
-	/**
-	 * Prepares a PDOStatement for execution and returns a Statement object.
-	 *
-	 * @param string    $sql       SQL template.
-	 * @param array     $options   Optional, driver-specific options.
-	 * @param Statement $statement Optional, existing Statement object to populate with new PDOStatement.
-	 *
-	 * @return Statement|false
-	 */
-	public function prepare($sql, $options = [], Statement $statement = null)
-	{
-		$hash = $this->getDbKey() . '-' . md5($sql);
+        return $this->statementCache[$hash] = $dbStatement;
+    }
 
-		// If existing Statement object provided, check it's the same one we have cached
-		if (!empty($statement) && (!isset(self::$_statements[$hash]) || self::$_statements[$hash] !== $statement)) {
-			throw new Exception("Provided Statement doesn't match cached value!");
-		}
+    public function query(string $query, ?int $fetchMode = null, ...$fetchModeArgs): DbStatement|false
+    {
+        $stmt = $this->attemptWithReconnect(function () use ($query, $fetchMode, $fetchModeArgs) {
+            return $this->getPdo()->query($query, $fetchMode, ...$fetchModeArgs);
+        });
 
-		if (!isset(self::$_statements[$hash]) || !empty($statement)) {
-			// Note: PdoMySQL actually uses emulated prepared statements by default, which don't
-			// need a live connection - but wrap it anyway, just in case this has been disabled.
-			$pdoStatement = $this->_autoReconnectOnFail(function () use ($sql, $options) {
-				return $this->getPdo()->prepare($sql, $options);
-			});
+        if (false === $stmt) {
+            return false;
+        }
 
-			// Only cache result if successful
-			if (false === $pdoStatement) {
-				return false; // TODO: Throw exception instead?
-			}
+        return new DbStatement($this, $stmt, $query, []);
+    }
 
-			if (empty($statement)) {
-				self::$_statements[$hash] = new Statement($this, $pdoStatement, $sql, $options);
-			} else {
-				$statement->setPdoStatement($pdoStatement);
-			}
-		}
+    public function exec(string $statement): int|false
+    {
+        return $this->attemptWithReconnect(fn() => $this->getPdo()->exec($statement));
+    }
 
-		return self::$_statements[$hash];
-	}
+    public function lastInsertId(?string $name = null): string|false
+    {
+        return $this->getPdo()->lastInsertId($name);
+    }
 
-	/**
-	 * Wraps PDO's quote method to allow usage for all primitive types and arrays.
-	 *
-	 * @param array|mixed $args          Argument(s) to escape.
-	 * @param integer     $parameterType Provides a data type hint for drivers that have alternate quoting styles.
-	 *
-	 * @return string|false
-	 */
-	public function quote($args, $parameterType = PDO::PARAM_STR)
-	{
-		$pdo = $this->getPdo();
-		if (is_array($args)) {
-			return implode(', ', array_map(function ($arg) use ($pdo, $parameterType) {
-				return $pdo->quote((string) $arg, $parameterType);
-			}, $args));
-		}
-		return $pdo->quote((string) $args, $parameterType);
-	}
+    public function beginTransaction(): bool
+    {
+        return $this->attemptWithReconnect(fn() => $this->getPdo()->beginTransaction());
+    }
 
-	/**
-	 * Magic method to implement all remaining PDO methods, and auto-reconnect where required.
-	 *
-	 * @param string $method    Name of method being called.
-	 * @param array  $arguments Array of any method arguments.
-	 *
-	 * @return mixed
-	 */
-	public function __call($method, $arguments)
-	{
-		if (in_array($method, self::AUTORECONNECT_METHODS)) {
-			return $this->_autoReconnectOnFail(function () use ($method, $arguments) {
-				return call_user_func_array([$this->getPdo(), $method], $arguments);
-			});
-		}
+    public function commit(): bool
+    {
+        return $this->getPdo()->commit();
+    }
 
-		return call_user_func_array([$this->getPdo(), $method], $arguments);
-	}
+    public function rollBack(): bool
+    {
+        return $this->getPdo()->rollBack();
+    }
 
-	/**
-	 * Destructor.
-	 *
-	 * Releases the connection back into the pool.
-	 */
-	public function __destruct()
-	{
-		// Not connected
-		if (!isset($this->_pdo)) {
-			return;
-		}
+    public function inTransaction(): bool
+    {
+        return $this->getPdo()->inTransaction();
+    }
 
-		ConnectionManager::addToPool($this->getDbKey(), $this->_pdo);
-	}
+    public function errorCode(): ?string
+    {
+        return $this->getPdo()->errorCode();
+    }
 
-	/**
-	 * Function which wraps the callback to auto-reconnect on disconnection.
-	 *
-	 * @param \Closure $callback The function to execute and reconnect on failure.
-	 *
-	 * @return mixed The value returned from the closure.
-	 */
-	protected function _autoReconnectOnFail(\Closure $callback)
-	{
-		// Note: Due to a bug in mysqlnd, this is needed even when using exceptions!
-		set_error_handler([$this, 'errorHandler'], E_WARNING);
+    public function errorInfo(): array
+    {
+        return $this->getPdo()->errorInfo();
+    }
 
-		try {
-			$result = $callback();
-			restore_error_handler();
-			return $result;
-		} catch (\Exception $ex) {
-			restore_error_handler();
+    public function quote(string $string, int $type = PDO::PARAM_STR): string|false
+    {
+        return $this->getPdo()->quote($string, $type);
+    }
 
-			// Check whether it's an issue we can handle by reconnecting
-			if (false === preg_match(ConnectionManager::getAutoReconnectErrorsRegex(), $ex->getMessage())) {
-				throw $ex;
-			}
+    public function getAttribute(int $attribute): mixed
+    {
+        return $this->getPdo()->getAttribute($attribute);
+    }
 
-			// Close connection and reconnect
-			unset($this->_pdo);
-			$this->getPdo();
+    public function setAttribute(int $attribute, mixed $value): bool
+    {
+        return $this->getPdo()->setAttribute($attribute, $value);
+    }
 
-			// Retry once
-			return $callback();
-		}
-	}
-
-	/**
-	 * Error handler for converting PHP warnings to exception.
-	 *
-	 * @param integer $errno  Error number.
-	 * @param string  $errstr Error message.
-	 *
-	 * @return boolean
-	 * @throws Exception
-	 */
-	public function errorHandler($errno, $errstr): bool
-	{
-		if ($errno !== E_WARNING) {
-			return false;
-		}
-
-		throw new Exception($errstr);
-	}
+    protected function attemptWithReconnect(callable $operation): mixed
+    {
+        try {
+            return $operation();
+        } catch (PDOException $e) {
+            if ($this->reconnectStrategy->shouldReconnect($e)) {
+                $this->setPdo(null);
+                return $operation();
+            }
+            throw $e;
+        }
+    }
 }

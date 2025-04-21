@@ -1,26 +1,54 @@
 {
     "name": "faster-php/db",
-    "description": "Faster PHP database connection management",
+    "description": "A drop-in replacement for PDO with connection pooling, lazy connect, auto-reconnect, and prepared statement caching.",
     "type": "library",
-    "require": {
-        "php": ">=8.2"
-    },
-    "require-dev": {
-        "phpunit/phpunit": "^9.5"
-    },
-    "license": "GPL-3.0-or-later",
+    "license": "MIT",
     "authors": [
         {
             "name": "Marcus Don",
-            "email": "marcus@sqldevelopment.co.uk"
+            "email": "marcus@fasterphp.com"
         }
     ],
+    "homepage": "https://github.com/FasterPHP/db",
+    "support": {
+        "issues": "https://github.com/FasterPHP/db/issues",
+        "source": "https://github.com/FasterPHP/db"
+    },
+    "keywords": [
+        "pdo",
+        "database",
+        "wrapper",
+        "reconnect",
+        "lazy",
+        "mysql",
+        "connection-pool",
+        "statement-cache"
+    ],
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    },
     "minimum-stability": "dev",
     "prefer-stable": true,
-	"autoload": {
-		"psr-4": {"FasterPhp\\Db\\": "src/"}
-	},
-	"autoload-dev": {
-		"psr-4": {"FasterPhp\\Db\\": "tests/"}
-	}
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo": "*"
+    },
+    "require-dev": {
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "phpunit/phpunit": "^11.5",
+        "roave/security-advisories": "dev-latest"
+    },
+    "autoload": {
+        "psr-4": {
+            "FasterPhp\\Db\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "FasterPhp\\Db\\": "tests/"
+        }
+    }
 }
+
