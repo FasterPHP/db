@@ -114,4 +114,28 @@ final class DbTest extends TestCase
         $this->assertIsArray($drivers);
         $this->assertContains('mysql', $drivers);
     }
+
+    public function testPrepareReturnsFalseWhenPdoReturnsFalse(): void
+    {
+        $mockPdo = $this->createMock(PDO::class);
+        $mockPdo->method('prepare')->willReturn(false);
+
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $db->setPdo($mockPdo);
+
+        $result = $db->prepare('SELECT 1');
+        $this->assertFalse($result);
+    }
+
+    public function testQueryReturnsFalseWhenPdoReturnsFalse(): void
+    {
+        $mockPdo = $this->createMock(PDO::class);
+        $mockPdo->method('query')->willReturn(false);
+
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $db->setPdo($mockPdo);
+
+        $result = $db->query('SELECT 1');
+        $this->assertFalse($result);
+    }
 }
