@@ -47,6 +47,11 @@ class Db extends PDO
         return $this->pdo ??= new PDO($this->dsn, $this->username, $this->password, $this->options);
     }
 
+    public function clearStatementCache(): void
+    {
+        $this->statementCache = [];
+    }
+
     public function prepare(string $query, array $options = [], DbStatement $dbStatement = null): DbStatement|false
     {
         $hash = md5($query . '|' . serialize($options));
