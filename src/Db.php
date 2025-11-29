@@ -226,6 +226,8 @@ class Db extends PDO
             if ($this->pdo?->inTransaction()) {
                 throw new DbException('Connection lost during transaction', 0, $cause);
             }
+        } catch (DbException $e) {
+            throw $e;
         } catch (PDOException) {
             // Connection is dead, rely on local flag only (already checked above)
         }

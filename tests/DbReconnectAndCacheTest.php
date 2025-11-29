@@ -218,6 +218,46 @@ final class DbReconnectAndCacheTest extends TestCase
         $db->assertNotInTransaction(new PDOException('test'));
     }
 
+    public function testAssertNotInTransactionThrowsWhenPdoReportsInTransaction(): void
+    {
+        // Test the belt-and-braces check: PDO reports in transaction even though
+        // our local flag is false. We need to inject a PDO that reports inTransaction=true
+        // without going through our beginTransaction() which sets the flag.
+
+        // Use anonymous class to inject a real PDO directly (bypassing setPdo's flag reset)
+        // and expose the internal pdo property for verification
+        $dsn = getenv('DB_DSN');
+        $user = getenv('DB_USER');
+        $pass = getenv('DB_PASS');
+
+        $db = new class ($dsn, $user, $pass) extends Db {
+            public function injectPdoWithTransaction(string $dsn, ?string $user, ?string $pass): void
+            {
+                // Create a real PDO and start a transaction on it directly
+                $this->pdo = new \PDO($dsn, $user, $pass);
+                $this->pdo->beginTransaction();
+            }
+
+            public function getInternalPdo(): ?\PDO
+            {
+                return $this->pdo;
+            }
+        };
+        $db->injectPdoWithTransaction($dsn, $user, $pass);
+
+        // Verify PDO is set and in transaction
+        $this->assertNotNull($db->getInternalPdo());
+        $this->assertTrue($db->getInternalPdo()->inTransaction());
+
+        // Our flag is false, but PDO reports in transaction
+        try {
+            $db->assertNotInTransaction(new PDOException('test'));
+            $this->fail('Expected DbException was not thrown');
+        } catch (DbException $e) {
+            $this->assertSame('Connection lost during transaction', $e->getMessage());
+        }
+    }
+
     public function testLoggerIsCalledOnReconnect(): void
     {
         $logger = $this->createMock(LoggerInterface::class);
