@@ -101,7 +101,7 @@ class DbStatement extends PDOStatement
         return $this->pdoStatement->fetch($mode, $cursorOrientation, $cursorOffset);
     }
 
-    public function fetchAll(int $mode = PDO::FETCH_FUNC, ...$params): array
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, ...$params): array
     {
         return $this->pdoStatement->fetchAll($mode, ...$params);
     }
