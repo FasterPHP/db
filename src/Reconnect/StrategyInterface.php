@@ -10,4 +10,6 @@ interface StrategyInterface
 {
     public function addPattern(string $pattern): self;
     public function shouldReconnect(PDOException $e): bool;
+    public function getMaxAttempts(): int;
+    public function getDelayMs(int $attempt): int;
 }

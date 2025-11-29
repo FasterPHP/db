@@ -150,11 +150,32 @@ class Db extends PDO
         try {
             return $operation();
         } catch (PDOException $e) {
-            if ($this->reconnectStrategy->shouldReconnect($e)) {
-                $this->setPdo(null);
-                return $operation();
+            if (!$this->reconnectStrategy->shouldReconnect($e)) {
+                throw $e;
             }
-            throw $e;
+
+            $maxAttempts = $this->reconnectStrategy->getMaxAttempts();
+            $lastException = $e;
+
+            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+                $delayMs = $this->reconnectStrategy->getDelayMs($attempt);
+                if ($delayMs > 0) {
+                    usleep($delayMs * 1000);
+                }
+
+                $this->setPdo(null);
+
+                try {
+                    return $operation();
+                } catch (PDOException $retryException) {
+                    $lastException = $retryException;
+                    if (!$this->reconnectStrategy->shouldReconnect($retryException)) {
+                        throw $retryException;
+                    }
+                }
+            }
+
+            throw $lastException;
         }
     }
 }

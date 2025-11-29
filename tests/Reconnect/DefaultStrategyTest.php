@@ -48,4 +48,30 @@ final class DefaultStrategyTest extends TestCase
 
         $this->assertFalse($strategy->shouldReconnect(new PDOException('something else')));
     }
+
+    public function testDefaultMaxAttempts(): void
+    {
+        $strategy = new DefaultStrategy();
+        $this->assertSame(1, $strategy->getMaxAttempts());
+    }
+
+    public function testCustomMaxAttempts(): void
+    {
+        $strategy = new DefaultStrategy(null, 3);
+        $this->assertSame(3, $strategy->getMaxAttempts());
+    }
+
+    public function testGetDelayMsFirstAttempt(): void
+    {
+        $strategy = new DefaultStrategy(null, 3, 100, 2.0);
+        $this->assertSame(0, $strategy->getDelayMs(1));
+    }
+
+    public function testGetDelayMsWithBackoff(): void
+    {
+        $strategy = new DefaultStrategy(null, 3, 100, 2.0);
+        $this->assertSame(100, $strategy->getDelayMs(2)); // 100 * 2^0
+        $this->assertSame(200, $strategy->getDelayMs(3)); // 100 * 2^1
+        $this->assertSame(400, $strategy->getDelayMs(4)); // 100 * 2^2
+    }
 }

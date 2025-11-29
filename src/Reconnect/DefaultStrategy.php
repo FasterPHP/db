@@ -19,10 +19,20 @@ class DefaultStrategy implements StrategyInterface
     ];
 
     protected array $patterns;
+    protected int $maxAttempts;
+    protected int $baseDelayMs;
+    protected float $backoffMultiplier;
 
-    public function __construct(?array $patterns = null)
-    {
+    public function __construct(
+        ?array $patterns = null,
+        int $maxAttempts = 1,
+        int $baseDelayMs = 100,
+        float $backoffMultiplier = 2.0
+    ) {
         $this->patterns = $patterns ?? self::DEFAULT_PATTERNS;
+        $this->maxAttempts = $maxAttempts;
+        $this->baseDelayMs = $baseDelayMs;
+        $this->backoffMultiplier = $backoffMultiplier;
     }
 
     public function getPatterns(): array
@@ -45,5 +55,18 @@ class DefaultStrategy implements StrategyInterface
             }
         }
         return false;
+    }
+
+    public function getMaxAttempts(): int
+    {
+        return $this->maxAttempts;
+    }
+
+    public function getDelayMs(int $attempt): int
+    {
+        if ($attempt <= 1) {
+            return 0;
+        }
+        return (int) ($this->baseDelayMs * pow($this->backoffMultiplier, $attempt - 2));
     }
 }
