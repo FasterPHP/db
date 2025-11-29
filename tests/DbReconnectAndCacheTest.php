@@ -8,6 +8,7 @@ use FasterPhp\Db\Reconnect\DefaultStrategy;
 use PHPUnit\Framework\TestCase;
 use PDO;
 use PDOException;
+use Psr\Log\LoggerInterface;
 
 final class DbReconnectAndCacheTest extends TestCase
 {
@@ -215,6 +216,53 @@ final class DbReconnectAndCacheTest extends TestCase
         $this->expectException(DbException::class);
         $this->expectExceptionMessage('Connection lost during transaction');
         $db->assertNotInTransaction(new PDOException('test'));
+    }
+
+    public function testLoggerIsCalledOnReconnect(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('warning')
+            ->with(
+                'Database connection lost and reconnected',
+                $this->callback(function ($context) {
+                    return isset($context['dsn']) && isset($context['exception']);
+                })
+            );
+
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $db->setLogger($logger);
+        $db->exec('SET SESSION wait_timeout = 1');
+        sleep(2);
+        $db->exec('SELECT 1');
+    }
+
+    public function testLoggerIsCalledOnReconnectViaStatement(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('warning')
+            ->with(
+                'Database connection lost and reconnected',
+                $this->callback(function ($context) {
+                    return isset($context['dsn']) && isset($context['exception']);
+                })
+            );
+
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $db->setLogger($logger);
+        $stmt = $db->prepare('SELECT 1');
+        $db->exec('SET SESSION wait_timeout = 1');
+        sleep(2);
+        $stmt->execute();
+    }
+
+    public function testLogReconnectWithNoLogger(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        // Should not throw when no logger is set
+        $db->logReconnect(new PDOException('test'));
+        $this->assertTrue(true);
     }
 
     private function getConnectionId(Db $db): int

@@ -7,6 +7,7 @@ namespace FasterPhp\Db;
 use FasterPhp\Db\Reconnect;
 use PDO;
 use PDOException;
+use Psr\Log\LoggerInterface;
 
 class Db extends PDO
 {
@@ -16,6 +17,7 @@ class Db extends PDO
     protected ?array $options;
     protected Reconnect\StrategyInterface $reconnectStrategy;
     protected ?PDO $pdo = null;
+    protected ?LoggerInterface $logger = null;
     private array $statementCache = [];
     private bool $inTransactionFlag = false;
 
@@ -36,6 +38,19 @@ class Db extends PDO
     public function getReconnectStrategy(): Reconnect\StrategyInterface
     {
         return $this->reconnectStrategy;
+    }
+
+    public function setLogger(?LoggerInterface $logger): void
+    {
+        $this->logger = $logger;
+    }
+
+    public function logReconnect(PDOException $exception): void
+    {
+        $this->logger?->warning('Database connection lost and reconnected', [
+            'dsn' => $this->dsn,
+            'exception' => $exception->getMessage(),
+        ]);
     }
 
     public function setPdo(?PDO $pdo): void
@@ -184,7 +199,9 @@ class Db extends PDO
                 $this->setPdo(null);
 
                 try {
-                    return $operation();
+                    $result = $operation();
+                    $this->logReconnect($lastException);
+                    return $result;
                 } catch (PDOException $retryException) {
                     $lastException = $retryException;
                     if (!$this->reconnectStrategy->shouldReconnect($retryException)) {

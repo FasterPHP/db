@@ -88,7 +88,9 @@ class DbStatement extends PDOStatement
                 $this->db->assertNotInTransaction($e);
                 $this->db->setPdo(null);
                 $this->db->prepare($this->sql, $this->options, $this);
-                return $this->pdoStatement->execute($params);
+                $result = $this->pdoStatement->execute($params);
+                $this->db->logReconnect($e);
+                return $result;
             }
             throw $e;
         }
