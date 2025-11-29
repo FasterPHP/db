@@ -7,9 +7,11 @@ If you're tired of dealing with intermittent MySQL timeouts or disconnects, repe
 Key features:
 
 - ✅ Drop-in `PDO` replacement (extends `PDO`, not just wraps it)
-- 🔁 Auto-reconnect on lost or timed-out connections
+- 🔁 Auto-reconnect on lost or timed-out connections with configurable retry/backoff
+- 🛡️ Transaction-aware reconnect protection
 - 🔄 Lazy-loading and internal connection pooling
 - ⚡️ Prepared statement caching for reduced overhead
+- 📝 Optional PSR-3 logging support
 - 🧱 Custom `DbStatement` class for enhanced control
 
 ---
@@ -52,7 +54,58 @@ $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
 If a connection is lost (e.g. due to a timeout), FasterPhp\Db automatically reconnects, re-prepares (where necessary), and re-executes the statement.
 
-You can configure reconnect patterns via `Config\ArrayProvider` or inject a custom `ReconnectStrategy`.
+### Configurable Retry with Exponential Backoff
+
+The `DefaultStrategy` supports configurable retry attempts with exponential backoff:
+
+```php
+use FasterPhp\Db\Db;
+use FasterPhp\Db\Reconnect\DefaultStrategy;
+
+$strategy = new DefaultStrategy(
+    maxAttempts: 3,        // Try up to 3 times (default: 1)
+    baseDelayMs: 100,      // Start with 100ms delay (default: 100)
+    backoffMultiplier: 2.0 // Double the delay each attempt (default: 2.0)
+);
+
+$db = new Db(
+    dsn: 'mysql:host=localhost;dbname=mydb',
+    username: 'myuser',
+    password: 'mysecret',
+    reconnectStrategy: $strategy
+);
+```
+
+With these settings, reconnect attempts will wait 100ms, then 200ms, then 400ms between retries.
+
+### Transaction-Aware Reconnect Protection
+
+Reconnecting mid-transaction would silently lose uncommitted changes. FasterPhp\Db prevents this by throwing a `DbException` if a reconnectable error occurs during an active transaction:
+
+```php
+$db->beginTransaction();
+$db->exec('INSERT INTO users (name) VALUES ("Alice")');
+// If connection is lost here, DbException is thrown instead of reconnecting
+// This prevents silent data loss
+```
+
+This protection works for both explicit transactions (`beginTransaction()`) and raw SQL transactions (`BEGIN`/`START TRANSACTION`).
+
+### PSR-3 Logging
+
+You can attach a PSR-3 compatible logger to monitor reconnect events:
+
+```php
+use Psr\Log\LoggerInterface;
+
+$db->setLogger($logger);
+
+// Reconnect events are logged at WARNING level with DSN and error details
+```
+
+### Custom Reconnect Strategy
+
+You can configure reconnect patterns via `Config\ArrayProvider` or inject a custom `ReconnectStrategy` by implementing `Reconnect\StrategyInterface`.
 
 ---
 
@@ -64,6 +117,12 @@ Prepared statements are cached internally to avoid repeated preparation overhead
 $stmt1 = $db->prepare('SELECT * FROM users WHERE id = :id');
 $stmt2 = $db->prepare('SELECT * FROM users WHERE id = :id');
 // $stmt1 === $stmt2
+```
+
+To clear the statement cache (e.g. after schema changes or to free memory):
+
+```php
+$db->clearStatementCache();
 ```
 
 ---
@@ -134,6 +193,12 @@ Run tests with:
 
 ```bash
 vendor/bin/phpunit
+```
+
+To generate a coverage report (requires Xdebug or PCOV):
+
+```bash
+vendor/bin/phpunit --coverage-html build/coverage
 ```
 
 ---
