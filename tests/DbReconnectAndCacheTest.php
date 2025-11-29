@@ -160,6 +160,63 @@ final class DbReconnectAndCacheTest extends TestCase
         }
     }
 
+    public function testReconnectBlockedDuringTransaction(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $db->beginTransaction();
+        $db->exec('SET SESSION wait_timeout = 1');
+        sleep(2);
+
+        $this->expectException(DbException::class);
+        $this->expectExceptionMessage('Connection lost during transaction');
+        $db->exec('SELECT 1');
+    }
+
+    public function testReconnectBlockedDuringTransactionViaStatement(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $stmt = $db->prepare('SELECT 1');
+        $db->beginTransaction();
+        $db->exec('SET SESSION wait_timeout = 1');
+        sleep(2);
+
+        $this->expectException(DbException::class);
+        $this->expectExceptionMessage('Connection lost during transaction');
+        $stmt->execute();
+    }
+
+    public function testSetPdoNullResetsTransactionFlag(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $db->beginTransaction();
+        $this->assertTrue($db->inTransaction());
+
+        $db->setPdo(null);
+
+        // After setPdo(null), the flag should be reset
+        // A new connection should not be in a transaction
+        $this->assertFalse($db->inTransaction());
+    }
+
+    public function testAssertNotInTransactionPassesWhenNotInTransaction(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+
+        // Should not throw - we're not in a transaction
+        $db->assertNotInTransaction(new PDOException('test'));
+        $this->assertTrue(true); // If we get here, the test passed
+    }
+
+    public function testAssertNotInTransactionThrowsWhenFlagSet(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $db->beginTransaction();
+
+        $this->expectException(DbException::class);
+        $this->expectExceptionMessage('Connection lost during transaction');
+        $db->assertNotInTransaction(new PDOException('test'));
+    }
+
     private function getConnectionId(Db $db): int
     {
         $stmt = $db->query('SELECT CONNECTION_ID() AS id');

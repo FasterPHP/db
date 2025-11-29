@@ -85,6 +85,7 @@ class DbStatement extends PDOStatement
             return $this->pdoStatement->execute($params);
         } catch (PDOException $e) {
             if ($this->db->getReconnectStrategy()->shouldReconnect($e)) {
+                $this->db->assertNotInTransaction($e);
                 $this->db->setPdo(null);
                 $this->db->prepare($this->sql, $this->options, $this);
                 return $this->pdoStatement->execute($params);

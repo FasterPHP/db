@@ -17,6 +17,7 @@ class Db extends PDO
     protected Reconnect\StrategyInterface $reconnectStrategy;
     protected ?PDO $pdo = null;
     private array $statementCache = [];
+    private bool $inTransactionFlag = false;
 
     public function __construct(
         string $dsn,
@@ -40,6 +41,9 @@ class Db extends PDO
     public function setPdo(?PDO $pdo): void
     {
         $this->pdo = $pdo;
+        if ($pdo === null) {
+            $this->inTransactionFlag = false;
+        }
     }
 
     public function getPdo(): PDO
@@ -102,17 +106,29 @@ class Db extends PDO
 
     public function beginTransaction(): bool
     {
-        return $this->attemptWithReconnect(fn() => $this->getPdo()->beginTransaction());
+        $result = $this->attemptWithReconnect(fn() => $this->getPdo()->beginTransaction());
+        if ($result) {
+            $this->inTransactionFlag = true;
+        }
+        return $result;
     }
 
     public function commit(): bool
     {
-        return $this->getPdo()->commit();
+        $result = $this->getPdo()->commit();
+        if ($result) {
+            $this->inTransactionFlag = false;
+        }
+        return $result;
     }
 
     public function rollBack(): bool
     {
-        return $this->getPdo()->rollBack();
+        $result = $this->getPdo()->rollBack();
+        if ($result) {
+            $this->inTransactionFlag = false;
+        }
+        return $result;
     }
 
     public function inTransaction(): bool
@@ -154,6 +170,8 @@ class Db extends PDO
                 throw $e;
             }
 
+            $this->assertNotInTransaction($e);
+
             $maxAttempts = $this->reconnectStrategy->getMaxAttempts();
             $lastException = $e;
 
@@ -176,6 +194,23 @@ class Db extends PDO
             }
 
             throw $lastException;
+        }
+    }
+
+    public function assertNotInTransaction(PDOException $cause): void
+    {
+        // Check local flag first (reliable even if connection is dead)
+        if ($this->inTransactionFlag) {
+            throw new DbException('Connection lost during transaction', 0, $cause);
+        }
+
+        // Belt-and-braces: also check PDO's state if connection is still alive
+        try {
+            if ($this->pdo?->inTransaction()) {
+                throw new DbException('Connection lost during transaction', 0, $cause);
+            }
+        } catch (PDOException) {
+            // Connection is dead, rely on local flag only (already checked above)
         }
     }
 }
