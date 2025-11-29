@@ -146,7 +146,7 @@ class DbStatement extends PDOStatement
         return $this->pdoStatement->setAttribute($attribute, $value);
     }
 
-    public function setFetchMode(int $mode = PDO::FETCH_COLUMN, ...$params): bool
+    public function setFetchMode(int $mode = PDO::FETCH_DEFAULT, ...$params): bool
     {
         return $this->pdoStatement->setFetchMode($mode, ...$params);
     }
