@@ -258,6 +258,37 @@ final class DbReconnectAndCacheTest extends TestCase
         }
     }
 
+    public function testAssertNotInTransactionHandlesDeadConnection(): void
+    {
+        // Test that when PDO::inTransaction() throws (dead connection),
+        // we catch the PDOException and rely on the local flag only.
+        // Since the local flag is false, no exception should be thrown.
+
+        // Create a mock PDO that throws when inTransaction() is called
+        $mockPdo = $this->createMock(\PDO::class);
+        $mockPdo->method('inTransaction')
+            ->willThrowException(new PDOException('MySQL server has gone away'));
+
+        $db = new class (
+            getenv('DB_DSN'),
+            getenv('DB_USER'),
+            getenv('DB_PASS')
+        ) extends Db {
+            public function injectPdo(\PDO $pdo): void
+            {
+                $this->pdo = $pdo;
+            }
+        };
+        $db->injectPdo($mockPdo);
+
+        // Should not throw - the PDOException from inTransaction() is caught,
+        // and since our local flag is false, we don't throw DbException
+        $db->assertNotInTransaction(new PDOException('test'));
+
+        // If we get here, the test passes
+        $this->assertTrue(true);
+    }
+
     public function testLoggerIsCalledOnReconnect(): void
     {
         $logger = $this->createMock(LoggerInterface::class);
