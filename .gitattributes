@@ -1,3 +1,4 @@
+* text=auto eol=lf
 /tests            export-ignore
 /phpunit.xml*     export-ignore
 /.github          export-ignore
