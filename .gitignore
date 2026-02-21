@@ -5,3 +5,4 @@ docs
 build
 composer.lock
 .idea
+phpunit.xml
