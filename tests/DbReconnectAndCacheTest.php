@@ -161,6 +161,79 @@ final class DbReconnectAndCacheTest extends TestCase
         }
     }
 
+    public function testReconnectRecoversFromNonPdoThrowable(): void
+    {
+        // Simulate a dropped connection surfacing as a non-PDOException
+        // Throwable (e.g. a mysqlnd warning converted to an ErrorException by
+        // a global error handler). The reconnect logic must still recover.
+        $strategy = new DefaultStrategy(null, 2, 10, 2.0);
+        $db = new class (
+            getenv('DB_DSN'),
+            getenv('DB_USER'),
+            getenv('DB_PASS'),
+            null,
+            $strategy
+        ) extends Db {
+            private int $attemptCount = 0;
+
+            public function getPdo(): \PDO
+            {
+                $this->attemptCount++;
+                if ($this->attemptCount === 1) {
+                    throw new \ErrorException('Packets out of order. Expected 1 received 0. Packet size=145');
+                }
+                return parent::getPdo();
+            }
+
+            public function getAttemptCount(): int
+            {
+                return $this->attemptCount;
+            }
+        };
+
+        $result = $db->exec('DO 1');
+        $this->assertSame(0, $result);
+        // Initial attempt (throws) + one retry (succeeds) = 2 total.
+        $this->assertSame(2, $db->getAttemptCount());
+    }
+
+    public function testNonReconnectableThrowablePropagatesWithoutRetry(): void
+    {
+        // A non-PDOException Throwable whose message matches no reconnect
+        // pattern must propagate untouched, with no retry attempt.
+        $strategy = new DefaultStrategy(null, 3, 10, 2.0);
+        $db = new class (
+            getenv('DB_DSN'),
+            getenv('DB_USER'),
+            getenv('DB_PASS'),
+            null,
+            $strategy
+        ) extends Db {
+            private int $attemptCount = 0;
+
+            public function getPdo(): \PDO
+            {
+                $this->attemptCount++;
+                throw new \RuntimeException('Some unrelated application bug');
+            }
+
+            public function getAttemptCount(): int
+            {
+                return $this->attemptCount;
+            }
+        };
+
+        try {
+            $db->exec('SELECT 1');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Some unrelated application bug', $e->getMessage());
+            $this->assertSame(1, $db->getAttemptCount());
+            return;
+        }
+
+        $this->fail('Expected RuntimeException to be thrown');
+    }
+
     public function testReconnectBlockedDuringTransaction(): void
     {
         $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
@@ -284,6 +357,36 @@ final class DbReconnectAndCacheTest extends TestCase
         // Should not throw - the PDOException from inTransaction() is caught,
         // and since our local flag is false, we don't throw DbException
         $db->assertNotInTransaction(new PDOException('test'));
+
+        // If we get here, the test passes
+        $this->assertTrue(true);
+    }
+
+    public function testAssertNotInTransactionSwallowsNonPdoThrowableFromProbe(): void
+    {
+        // The live-state probe (PDO::inTransaction()) can fail with a non-PDO
+        // Throwable - e.g. a mysqlnd warning converted to an ErrorException by
+        // a global error handler. That must be swallowed too, falling back to
+        // the local flag rather than escaping assertNotInTransaction().
+
+        $mockPdo = $this->createMock(\PDO::class);
+        $mockPdo->method('inTransaction')
+            ->willThrowException(new \ErrorException('Packets out of order. Expected 1 received 0'));
+
+        $db = new class (
+            getenv('DB_DSN'),
+            getenv('DB_USER'),
+            getenv('DB_PASS')
+        ) extends Db {
+            public function injectPdo(\PDO $pdo): void
+            {
+                $this->pdo = $pdo;
+            }
+        };
+        $db->injectPdo($mockPdo);
+
+        // Local flag is false, so no exception should be thrown.
+        $db->assertNotInTransaction(new \ErrorException('test'));
 
         // If we get here, the test passes
         $this->assertTrue(true);

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace FasterPhp\Db\Reconnect;
 
-use PDOException;
+use Throwable;
 
 class DefaultStrategy implements StrategyInterface
 {
@@ -16,6 +16,7 @@ class DefaultStrategy implements StrategyInterface
         'MySQL server has gone away',
         'SSL connection has been closed unexpectedly',
         'Error writing data to the connection',
+        'Packets out of order',
     ];
 
     protected array $patterns;
@@ -46,7 +47,7 @@ class DefaultStrategy implements StrategyInterface
         return $this;
     }
 
-    public function shouldReconnect(PDOException $e): bool
+    public function shouldReconnect(Throwable $e): bool
     {
         $message = $e->getMessage();
         foreach ($this->patterns as $pattern) {

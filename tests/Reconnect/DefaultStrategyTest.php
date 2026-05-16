@@ -49,6 +49,32 @@ final class DefaultStrategyTest extends TestCase
         $this->assertFalse($strategy->shouldReconnect(new PDOException('something else')));
     }
 
+    public function testShouldReconnectMatchesPacketsOutOfOrder(): void
+    {
+        $strategy = new DefaultStrategy();
+
+        // mysqlnd raises this as a PHP warning on a dropped connection; it can
+        // reach the strategy as an ErrorException rather than a PDOException.
+        $exception = new \ErrorException('Packets out of order. Expected 1 received 0. Packet size=145');
+        $this->assertTrue($strategy->shouldReconnect($exception));
+    }
+
+    public function testShouldReconnectAcceptsNonPdoThrowable(): void
+    {
+        $strategy = new DefaultStrategy(['pattern']);
+
+        $this->assertTrue($strategy->shouldReconnect(new \ErrorException('a pattern match')));
+        $this->assertTrue($strategy->shouldReconnect(new \RuntimeException('another pattern here')));
+    }
+
+    public function testShouldReconnectFalseForNonReconnectableThrowable(): void
+    {
+        $strategy = new DefaultStrategy(['pattern']);
+
+        // A genuine programming error must never be treated as recoverable.
+        $this->assertFalse($strategy->shouldReconnect(new \TypeError('Argument must be of type int')));
+    }
+
     public function testDefaultMaxAttempts(): void
     {
         $strategy = new DefaultStrategy();

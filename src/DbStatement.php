@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace FasterPhp\Db;
 
 use Iterator;
-use PDOException;
 use PDOStatement;
 use PDO;
+use Throwable;
 
 class DbStatement extends PDOStatement
 {
@@ -83,7 +83,7 @@ class DbStatement extends PDOStatement
     {
         try {
             return $this->pdoStatement->execute($params);
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
             if ($this->db->getReconnectStrategy()->shouldReconnect($e)) {
                 $this->db->assertNotInTransaction($e);
                 $this->db->setPdo(null);

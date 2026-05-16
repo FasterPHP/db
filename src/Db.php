@@ -6,8 +6,8 @@ namespace FasterPhp\Db;
 
 use FasterPhp\Db\Reconnect;
 use PDO;
-use PDOException;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 class Db extends PDO
 {
@@ -45,7 +45,7 @@ class Db extends PDO
         $this->logger = $logger;
     }
 
-    public function logReconnect(PDOException $exception): void
+    public function logReconnect(Throwable $exception): void
     {
         $this->logger?->warning('Database connection lost and reconnected', [
             'dsn' => $this->dsn,
@@ -180,7 +180,11 @@ class Db extends PDO
     {
         try {
             return $operation();
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
+            // Catch any Throwable, not just PDOException: a dropped connection
+            // can surface as a mysqlnd warning (converted to an ErrorException
+            // by a global error handler) before PDO raises a PDOException. The
+            // reconnect strategy decides whether the failure is recoverable.
             if (!$this->reconnectStrategy->shouldReconnect($e)) {
                 throw $e;
             }
@@ -202,7 +206,7 @@ class Db extends PDO
                     $result = $operation();
                     $this->logReconnect($lastException);
                     return $result;
-                } catch (PDOException $retryException) {
+                } catch (Throwable $retryException) {
                     $lastException = $retryException;
                     if (!$this->reconnectStrategy->shouldReconnect($retryException)) {
                         throw $retryException;
@@ -214,7 +218,7 @@ class Db extends PDO
         }
     }
 
-    public function assertNotInTransaction(PDOException $cause): void
+    public function assertNotInTransaction(Throwable $cause): void
     {
         // Check local flag first (reliable even if connection is dead)
         if ($this->inTransactionFlag) {
@@ -228,8 +232,8 @@ class Db extends PDO
             }
         } catch (DbException $e) {
             throw $e;
-        } catch (PDOException) {
-            // Connection is dead, rely on local flag only (already checked above)
+        } catch (Throwable) {
+            // Live-state probe failed; rely on local flag only (already checked above)
         }
     }
 }
