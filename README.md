@@ -221,12 +221,12 @@ This keeps your configuration logic separate from your application logic, and ma
 
 ## 🧪 Testing
 
-Tests require a MySQL server with a `testdb` database. You can configure your environment using `.env` variables or `phpunit.xml`:
+Tests require a MySQL server with a `db_test` database. You can configure your environment using `.env` variables or `phpunit.xml`:
 
 ```
-DB_DSN="mysql:host=127.0.0.1;dbname=testdb"
-DB_USER="root"
-DB_PASS=""
+DB_DSN="mysql:host=localhost;dbname=db_test"
+DB_USER="db_test"
+DB_PASS="db_test"
 ```
 
 Run tests with:
