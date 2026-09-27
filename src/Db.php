@@ -151,6 +151,47 @@ class Db extends PDO
         return $this->getPdo()->inTransaction();
     }
 
+    /**
+     * Run the work as one transaction, owning it only if none is active on entry.
+     *
+     * When owning, begins, runs the work and commits; on failure rolls back and rethrows the original
+     * throwable, even if the rollback itself fails. A failed rollback discards the connection so the
+     * next operation can reconnect. When joining, runs the work without beginning, committing or rolling
+     * back, and lets any throwable propagate untouched. Nested calls join; there are no savepoints.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    public function transaction(callable $work): mixed
+    {
+        // Decided once: at commit or rollback time inTransaction() would report our own transaction.
+        if ($this->inTransaction()) {
+            return $work();
+        }
+
+        $this->beginTransaction();
+        try {
+            $result = $work();
+            if (!$this->commit()) {
+                throw new DbException('Transaction commit failed');
+            }
+        } catch (Throwable $e) {
+            // A rollback after a lost connection fails too; it must not mask the original cause.
+            try {
+                $rolledBack = $this->rollBack();
+            } catch (Throwable) {
+                $rolledBack = false;
+            }
+            if (!$rolledBack) {
+                $this->setPdo(null);
+            }
+            throw $e;
+        }
+
+        return $result;
+    }
+
     public function errorCode(): ?string
     {
         return $this->getPdo()->errorCode();

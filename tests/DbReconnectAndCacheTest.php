@@ -392,6 +392,81 @@ final class DbReconnectAndCacheTest extends TestCase
         $this->assertTrue(true);
     }
 
+    public function testTransactionRecoversWhenConnectionLostDuringWork(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $connectionIdBefore = $this->getConnectionId($db);
+        $invocations = 0;
+
+        try {
+            $db->transaction(function () use ($db, &$invocations) {
+                $invocations++;
+                $db->exec('SET SESSION wait_timeout = 1');
+                sleep(2);
+                $db->exec('DO 1');
+            });
+            $this->fail('Expected DbException was not thrown');
+        } catch (DbException $e) {
+            $this->assertSame('Connection lost during transaction', $e->getMessage());
+        }
+
+        $this->assertSame(1, $invocations, 'Work must not be retried');
+        $this->assertNotSame($connectionIdBefore, $this->getConnectionId($db));
+        $this->assertFalse($db->inTransaction());
+    }
+
+    public function testTransactionRecoversWhenConnectionLostBeforeCommit(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $connectionIdBefore = $this->getConnectionId($db);
+
+        try {
+            $db->transaction(function () use ($db) {
+                $db->exec('SET SESSION wait_timeout = 1');
+                sleep(2);
+            });
+            $this->fail('Expected PDOException was not thrown');
+        } catch (PDOException $e) {
+            $this->assertNotSame('Transaction commit failed', $e->getMessage());
+        }
+
+        $this->assertNotSame($connectionIdBefore, $this->getConnectionId($db));
+        $this->assertFalse($db->inTransaction());
+    }
+
+    public function testTransactionReconnectsStaleIdleConnection(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $connectionIdBefore = $this->getConnectionId($db);
+        $db->exec('SET SESSION wait_timeout = 1');
+        sleep(2);
+
+        $connectionIdInside = $db->transaction(fn() => $this->getConnectionId($db));
+
+        $this->assertNotSame($connectionIdBefore, $connectionIdInside);
+        $this->assertFalse($db->inTransaction());
+    }
+
+    public function testCachedStatementExecutesAfterTransactionRecovery(): void
+    {
+        $db = new Db(getenv('DB_DSN'), getenv('DB_USER'), getenv('DB_PASS'));
+        $stmt = $db->prepare('SELECT 1 AS val');
+
+        try {
+            $db->transaction(function () use ($db) {
+                $db->exec('SET SESSION wait_timeout = 1');
+                sleep(2);
+                $db->exec('DO 1');
+            });
+            $this->fail('Expected DbException was not thrown');
+        } catch (DbException) {
+        }
+
+        $this->assertSame($stmt, $db->prepare('SELECT 1 AS val'), 'Statement should come from cache');
+        $stmt->execute();
+        $this->assertSame(['val' => 1], $stmt->fetch(PDO::FETCH_ASSOC));
+    }
+
     public function testLoggerIsCalledOnReconnect(): void
     {
         $logger = $this->createMock(LoggerInterface::class);
