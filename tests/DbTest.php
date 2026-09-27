@@ -98,7 +98,7 @@ final class DbTest extends TestCase
             $this->db->exec("INSERT INTO notexists (name) VALUES ('blah')");
         } catch (PDOException) {
         }
-        $this->assertSame(['42S02', 1146, "Table 'testdb.notexists' doesn't exist"], $this->db->errorInfo());
+        $this->assertSame(['42S02', 1146, "Table 'db_test.notexists' doesn't exist"], $this->db->errorInfo());
     }
 
     public function testSetGetAttribute(): void

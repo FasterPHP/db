@@ -94,7 +94,7 @@ final class DbReconnectAndCacheTest extends TestCase
     {
         $strategy = new DefaultStrategy(null, 2, 10, 2.0);
         $db = new class (
-            'mysql:host=invalid_host_that_does_not_exist;dbname=testdb',
+            'mysql:host=invalid_host_that_does_not_exist;dbname=db_test',
             'root',
             '',
             null,
@@ -128,7 +128,7 @@ final class DbReconnectAndCacheTest extends TestCase
     {
         $strategy = new DefaultStrategy(null, 3, 10, 2.0);
         $db = new class (
-            'mysql:host=invalid_host;dbname=testdb',
+            'mysql:host=invalid_host;dbname=db_test',
             'root',
             '',
             null,
