@@ -20,7 +20,7 @@ Key features:
 ## 🚀 Installation
 
 ```bash
-composer require fasterphp/db
+composer require faster-php/db
 ```
 
 ---
