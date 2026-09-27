@@ -9,6 +9,7 @@ Key features:
 - ✅ Drop-in `PDO` replacement (extends `PDO`, not just wraps it)
 - 🔁 Auto-reconnect on lost or timed-out connections with configurable retry/backoff
 - 🛡️ Transaction-aware reconnect protection
+- 🔒 Managed transactions via `transaction()`, with safe nesting
 - 🔄 Lazy-loading and internal connection pooling
 - ⚡️ Prepared statement caching for reduced overhead
 - 📝 Optional PSR-3 logging support
@@ -90,6 +91,45 @@ $db->exec('INSERT INTO users (name) VALUES ("Alice")');
 ```
 
 This protection works for both explicit transactions (`beginTransaction()`) and raw SQL transactions (`BEGIN`/`START TRANSACTION`).
+
+### Managed Transactions
+
+`transaction()` runs a callable as a single transaction and returns its result:
+
+```php
+$userId = $db->transaction(function () use ($db) {
+    $db->prepare('INSERT INTO users (name) VALUES (?)')->execute(['Alice']);
+    $userId = (int)$db->lastInsertId();
+    $db->prepare('INSERT INTO audit (user_id) VALUES (?)')->execute([$userId]);
+    return $userId;
+});
+```
+
+If no transaction is active, `transaction()` owns one: it begins, runs the work and commits. If the work throws, it rolls back and rethrows the original exception, even if the rollback itself fails.
+
+If a transaction is already active (from `beginTransaction()`, raw SQL, or an enclosing `transaction()` call), the work joins it: nothing is begun, committed or rolled back, and any exception propagates to the owner. This lets transactional methods call each other safely:
+
+```php
+function createUser(Db $db, string $name): int
+{
+    return $db->transaction(function () use ($db, $name) {
+        $db->prepare('INSERT INTO users (name) VALUES (?)')->execute([$name]);
+        return (int)$db->lastInsertId();
+    });
+}
+
+$db->transaction(function () use ($db) {
+    createUser($db, 'Alice');
+    createUser($db, 'Bob');
+}); // Both users are committed together, or neither is
+```
+
+Points to be aware of:
+
+- **Recovery after connection loss:** if the connection is lost inside an owned transaction, the original exception is rethrown and the connection is discarded, so the next operation reconnects normally rather than being refused as a lost transaction.
+- **No retries:** the work is run at most once. Retrying after a deadlock or connection loss is left to the caller, since the work may have side effects outside the database.
+- **No savepoints:** a nested call shares the outer transaction. If the outer work catches an exception from a nested call, the nested call's writes are still committed with the rest.
+- **Lost commit acknowledgement:** if the connection drops while the commit is in flight, the server may or may not have committed. The error is rethrown, but the outcome cannot be known from the client.
 
 ### PSR-3 Logging
 

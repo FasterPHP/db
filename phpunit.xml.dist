@@ -5,9 +5,9 @@
 >
     <php>
         <ini name="error_reporting" value="E_ALL"/>
-        <env name="DB_DSN" value="mysql:host=127.0.0.1;dbname=testdb"/>
-        <env name="DB_USER" value="root"/>
-        <env name="DB_PASS" value=""/>
+        <env name="DB_DSN" value="mysql:host=localhost;dbname=db_test"/>
+        <env name="DB_USER" value="db_test"/>
+        <env name="DB_PASS" value="db_test"/>
     </php>
     <source>
         <include>
